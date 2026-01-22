@@ -10,8 +10,11 @@ import app from "./app.js";
 import Meal from "./models/meal/meal.model.js";
 import { getDate_24_HH_MM } from "./utils/date_time_utils.js";
 
-// Get port from env or default
-const PORT = 2000;
+// ✅ Local = 5000 (from .env)
+// ✅ Render = dynamic PORT injected by Render
+const PORT = process.env.PORT || 5000;
+
+let server;
 
 // Define default meals
 const defaultMeals = [
@@ -42,19 +45,47 @@ const defaultMeals = [
   },
 ];
 
-// Connect to MongoDB, seed meals if needed, and start server
-connect().then(async () => {
-  // Check and seed meals
-  const mealCount = await Meal.countDocuments();
-  if (mealCount === 0) {
-    await defaultMeals.forEach(async (meal) => await Meal.create(meal)); // ✅ Use this
-    console.log("🍽️  Default meals seeded into the database.");
+// Graceful shutdown (prevents port lock issues)
+const shutdown = () => {
+  console.log("🛑 Shutting down server...");
+  if (server) {
+    server.close(() => {
+      console.log("✅ Server closed");
+      process.exit(0);
+    });
   } else {
-    console.log("🍽️  Meals already present. Skipping seed.");
+    process.exit(0);
   }
+};
 
-  // Start server
-  app.listen(PORT, () => {
-    console.log(`✅ Server is running on port ${PORT}`);
-  });
-});
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+// Start server safely
+const startServer = async () => {
+  try {
+    await connect();
+    console.log("✅ MongoDB Connected");
+
+    // ✅ Safe seeding (no async forEach bug)
+    const mealCount = await Meal.countDocuments();
+    if (mealCount === 0) {
+      await Meal.insertMany(defaultMeals);
+      console.log("🍽️ Default meals seeded into the database.");
+    } else {
+      console.log("🍽️ Meals already present. Skipping seed.");
+    }
+
+    if (!server) {
+      server = app.listen(PORT, "0.0.0.0", () => {
+        console.log(`🚀 Server is running on port ${PORT}`);
+      });
+    }
+  } catch (err) {
+    console.error("❌ Startup error:", err);
+    process.exit(1);
+  }
+};
+
+// Run app
+startServer();
